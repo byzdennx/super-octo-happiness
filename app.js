@@ -69,7 +69,7 @@ const api = {
 
     /* ---------- AUTH ---------- */
     async register(email, password) {
-        return this.request('/rest/v1/auth/register', {
+        return this.request('/rest/v1/auth/v1/signup', {
             method: 'POST',
             skipAuth: true,
             body: JSON.stringify({ email, password }),
@@ -77,7 +77,7 @@ const api = {
     },
 
     async login(email, password) {
-        return this.request('/rest/v1/auth/login', {
+        return this.request('/rest/v1/auth/v1/token', {
             method: 'POST',
             skipAuth: true,
             body: JSON.stringify({ email, password }),
