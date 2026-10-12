@@ -1,3 +1,12 @@
+/* ============================================================
+   MyNotes — Frontend for EpanBase
+   Auth endpoints:
+     POST /rest/v1/auth/register   { email, password }
+     POST /rest/v1/auth/login      { email, password }
+   Data endpoints (Bearer token):
+     GET/POST/PATCH/DELETE /rest/v1/notes
+   ============================================================ */
+
 // ==================== CONFIG ====================
 const EPANBASE_URL = 'https://gentle-sea-6f11.siburianepan1.workers.dev';
 const EPANBASE_KEY = 'epb_fe5afa0eea5205945093479b7110c9277f025a64e061e8df';
@@ -20,81 +29,142 @@ const api = {
         const headers = {
             'Content-Type': 'application/json',
             'apikey': EPANBASE_KEY,
-            ...options.headers,
+            ...(options.headers || {}),
         };
-        
-        if (state.token) {
+
+        if (state.token && !options.skipAuth) {
             headers['Authorization'] = `Bearer ${state.token}`;
         }
-        
-        const res = await fetch(`${EPANBASE_URL}${endpoint}`, {
-            ...options,
-            headers,
-        });
-        
-        const data = await res.json().catch(() => ({}));
-        
-        if (!res.ok) {
-            throw new Error(data.message || data.error || `HTTP ${res.status}`);
+
+        let res;
+        try {
+            res = await fetch(`${EPANBASE_URL}${endpoint}`, {
+                ...options,
+                headers,
+            });
+        } catch (netErr) {
+            throw new Error('Tidak dapat terhubung ke server. Periksa koneksi internet Anda.');
         }
-        
+
+        // Parse body
+        const text = await res.text();
+        let data = {};
+        try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
+
+        if (!res.ok) {
+            const msg =
+                data?.message ||
+                data?.error ||
+                data?.error_description ||
+                data?.msg ||
+                `HTTP ${res.status} ${res.statusText}`;
+            const err = new Error(msg);
+            err.status = res.status;
+            err.data = data;
+            throw err;
+        }
+
         return data;
     },
-    
-    // Auth
-    async signUp(email, password) {
-        return this.request('/auth/v1/signup', {
+
+    /* ---------- AUTH ---------- */
+    async register(email, password) {
+        return this.request('/rest/v1/auth/register', {
             method: 'POST',
+            skipAuth: true,
             body: JSON.stringify({ email, password }),
         });
     },
-    
-    async signIn(email, password) {
-        return this.request('/auth/v1/token?grant_type=password', {
+
+    async login(email, password) {
+        return this.request('/rest/v1/auth/login', {
             method: 'POST',
+            skipAuth: true,
             body: JSON.stringify({ email, password }),
         });
     },
-    
-    async signOut() {
-        return this.request('/auth/v1/logout', { method: 'POST' }).catch(() => {});
+
+    async me() {
+        // Coba beberapa endpoint umum; kalau gagal, kita pakai data user dari localStorage
+        try { return await this.request('/rest/v1/auth/me'); } catch (_) {}
+        try { return await this.request('/rest/v1/auth/user'); } catch (_) {}
+        try { return await this.request('/rest/v1/user'); } catch (_) {}
+        return null;
     },
-    
-    async getUser() {
-        return this.request('/auth/v1/user');
-    },
-    
-    // Notes CRUD
+
+    /* ---------- NOTES ---------- */
     async getNotes() {
-        // EpanBase REST API format (mirip Supabase/PostgREST)
         const data = await this.request('/rest/v1/notes?select=*&order=is_pinned.desc,updated_at.desc');
-        return Array.isArray(data) ? data : (data.data || []);
+        return normalizeList(data);
     },
-    
+
     async createNote(note) {
         const data = await this.request('/rest/v1/notes', {
             method: 'POST',
             headers: { 'Prefer': 'return=representation' },
             body: JSON.stringify(note),
         });
-        return Array.isArray(data) ? data[0] : (data.data?.[0] || data);
+        return normalizeItem(data);
     },
-    
+
     async updateNote(id, updates) {
-        const data = await this.request(`/rest/v1/notes?id=eq.${id}`, {
+        const data = await this.request(`/rest/v1/notes?id=eq.${encodeURIComponent(id)}`, {
             method: 'PATCH',
             headers: { 'Prefer': 'return=representation' },
             body: JSON.stringify(updates),
         });
-        return Array.isArray(data) ? data[0] : (data.data?.[0] || data);
+        return normalizeItem(data);
     },
-    
+
     async deleteNote(id) {
-        return this.request(`/rest/v1/notes?id=eq.${id}`, {
+        return this.request(`/rest/v1/notes?id=eq.${encodeURIComponent(id)}`, {
             method: 'DELETE',
         });
     },
 };
+
+// Normalizers — handle both array-of-objects and wrapped responses
+function normalizeList(data) {
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data?.data)) return data.data;
+    if (Array.isArray(data?.rows)) return data.rows;
+    if (Array.isArray(data?.results)) return data.results;
+    return [];
+}
+
+function normalizeItem(data) {
+    if (Array.isArray(data)) return data[0] || null;
+    if (data?.data) {
+        return Array.isArray(data.data) ? data.data[0] : data.data;
+    }
+    return data;
+}
+
+// Extract token from various possible login responses
+function extractToken(resp) {
+    if (!resp || typeof resp !== 'object') return null;
+    return (
+        resp.access_token ||
+        resp.token ||
+        resp.jwt ||
+        resp.session?.access_token ||
+        resp.data?.access_token ||
+        resp.data?.token ||
+        resp.data?.session?.access_token ||
+        null
+    );
+}
+
+function extractUser(resp, fallbackEmail) {
+    const u =
+        resp?.user ||
+        resp?.data?.user ||
+        resp?.session?.user ||
+        resp?.data?.session?.user ||
+        null;
+    if (u) return u;
+    return { email: fallbackEmail, id: null };
+}
 
 // ==================== DOM REFS ====================
 const $ = (sel) => document.querySelector(sel);
@@ -108,28 +178,28 @@ const dom = {
     password: $('#password'),
     authSubmit: $('#authSubmit'),
     authFooter: $('#authFooter'),
-    switchAuth: $('#switchAuth'),
     authTabs: $$('.auth-tab'),
-    
+
     userEmail: $('#userEmail'),
     userAvatar: $('#userAvatar'),
     logoutBtn: $('#logoutBtn'),
     newNoteBtn: $('#newNoteBtn'),
     emptyNewNoteBtn: $('#emptyNewNoteBtn'),
-    
+
     navItems: $$('.nav-item'),
     countAll: $('#countAll'),
     countPinned: $('#countPinned'),
     countArchived: $('#countArchived'),
-    
+
     searchInput: $('#searchInput'),
     viewBtns: $$('.view-btn'),
     viewTitle: $('#viewTitle'),
     noteCountLabel: $('#noteCountLabel'),
     notesContainer: $('#notesContainer'),
     emptyState: $('#emptyState'),
-    
+
     editorModal: $('#editorModal'),
+    editorBackdrop: $('#editorBackdrop'),
     noteTitle: $('#noteTitle'),
     noteContent: $('#noteContent'),
     noteUpdatedAt: $('#noteUpdatedAt'),
@@ -139,80 +209,97 @@ const dom = {
     archiveNoteBtn: $('#archiveNoteBtn'),
     deleteNoteBtn: $('#deleteNoteBtn'),
     colorSwatches: $$('.color-swatch'),
-    
+
     toast: $('#toast'),
     mobileMenu: $('#mobileMenu'),
-    sidebar: $('.sidebar'),
+    sidebar: $('#sidebar'),
 };
 
 // ==================== AUTH MODE ====================
 let authMode = 'login';
 
-dom.authTabs.forEach(tab => {
-    tab.addEventListener('click', () => {
-        authMode = tab.dataset.tab;
-        dom.authTabs.forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
-        dom.authSubmit.textContent = authMode === 'login' ? 'Masuk' : 'Daftar';
-        dom.authFooter.innerHTML = authMode === 'login'
-            ? 'Belum punya akun? <a href="#" id="switchAuth">Daftar sekarang</a>'
-            : 'Sudah punya akun? <a href="#" id="switchAuth">Masuk di sini</a>';
-        bindSwitchAuth();
-    });
-});
+function setAuthMode(mode) {
+    authMode = mode;
+    dom.authTabs.forEach(t => t.classList.toggle('active', t.dataset.tab === mode));
+    dom.authSubmit.textContent = mode === 'login' ? 'Masuk' : 'Daftar';
+    dom.authFooter.innerHTML = mode === 'login'
+        ? 'Belum punya akun? <a href="#" id="switchAuth">Daftar sekarang</a>'
+        : 'Sudah punya akun? <a href="#" id="switchAuth">Masuk di sini</a>';
+    dom.password.setAttribute('autocomplete', mode === 'login' ? 'current-password' : 'new-password');
+    bindSwitchAuth();
+}
 
 function bindSwitchAuth() {
     const link = $('#switchAuth');
-    if (link) {
-        link.addEventListener('click', (e) => {
-            e.preventDefault();
-            const targetTab = authMode === 'login' ? 'register' : 'login';
-            document.querySelector(`.auth-tab[data-tab="${targetTab}"]`).click();
-        });
-    }
+    if (!link) return;
+    link.addEventListener('click', (e) => {
+        e.preventDefault();
+        setAuthMode(authMode === 'login' ? 'register' : 'login');
+    });
 }
-bindSwitchAuth();
+
+dom.authTabs.forEach(tab => {
+    tab.addEventListener('click', () => setAuthMode(tab.dataset.tab));
+});
+
+setAuthMode('login');
 
 // ==================== AUTH HANDLER ====================
 dom.authForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const email = dom.email.value.trim();
     const password = dom.password.value;
-    
+
+    if (!email || password.length < 6) {
+        showToast('Email & password minimal 6 karakter', 'error');
+        return;
+    }
+
     dom.authSubmit.disabled = true;
-    dom.authSubmit.textContent = 'Memproses...';
-    
+    const originalText = dom.authSubmit.textContent;
+    dom.authSubmit.textContent = authMode === 'login' ? 'Masuk...' : 'Mendaftar...';
+
     try {
-        let result;
+        let resp;
         if (authMode === 'login') {
-            result = await api.signIn(email, password);
+            resp = await api.login(email, password);
         } else {
-            result = await api.signUp(email, password);
-            if (!result.access_token && !result.session) {
-                showToast('Cek email untuk verifikasi, lalu masuk.', 'success');
-                authMode = 'login';
-                document.querySelector('.auth-tab[data-tab="login"]').click();
-                return;
-            }
+            resp = await api.register(email, password);
         }
-        
-        const token = result.access_token || result.session?.access_token;
-        const user = result.user || result.session?.user;
-        
-        if (token) {
-            state.token = token;
-            state.user = user;
-            localStorage.setItem('mynotes_token', token);
-            localStorage.setItem('mynotes_user', JSON.stringify(user));
-            await enterApp();
-        } else {
-            throw new Error('Tidak menerima token dari server');
+
+        // Kalau register sukses tanpa token → arahkan login
+        let token = extractToken(resp);
+        if (!token && authMode === 'register') {
+            showToast('Registrasi berhasil. Silakan masuk.', 'success');
+            setAuthMode('login');
+            dom.password.value = '';
+            return;
         }
+
+        // Kalau register sukses tapi tidak ada token, coba login otomatis
+        if (!token && authMode === 'register') {
+            resp = await api.login(email, password);
+            token = extractToken(resp);
+        }
+
+        if (!token) {
+            throw new Error('Server tidak mengembalikan token. Cek respons API.');
+        }
+
+        state.token = token;
+        state.user = extractUser(resp, email);
+
+        localStorage.setItem('mynotes_token', token);
+        localStorage.setItem('mynotes_user', JSON.stringify(state.user));
+
+        await enterApp();
+        showToast(`Selamat datang, ${state.user.email}!`, 'success');
     } catch (err) {
+        console.error('[auth]', err, err.data);
         showToast(err.message || 'Autentikasi gagal', 'error');
     } finally {
         dom.authSubmit.disabled = false;
-        dom.authSubmit.textContent = authMode === 'login' ? 'Masuk' : 'Daftar';
+        dom.authSubmit.textContent = originalText;
     }
 });
 
@@ -220,33 +307,40 @@ dom.authForm.addEventListener('submit', async (e) => {
 async function enterApp() {
     dom.authScreen.classList.add('hidden');
     dom.app.classList.remove('hidden');
-    
+
     const email = state.user?.email || 'user@email.com';
     dom.userEmail.textContent = email;
-    dom.userAvatar.textContent = email[0].toUpperCase();
-    
+    dom.userAvatar.textContent = (email[0] || 'U').toUpperCase();
+
     await loadNotes();
 }
 
 async function loadNotes() {
+    dom.notesContainer.className = 'notes-container grid';
+    dom.notesContainer.innerHTML = '<div class="loading-msg">Memuat catatan…</div>';
+    dom.emptyState.classList.add('hidden');
+
     try {
-        dom.notesContainer.innerHTML = '<div style="padding:20px;font-family:var(--font-mono);font-size:13px;color:var(--ink-muted)">Memuat catatan...</div>';
         state.notes = await api.getNotes();
         renderNotes();
     } catch (err) {
-        console.error('Load notes error:', err);
-        // Jika tabel belum ada / error, mulai dengan array kosong
+        console.error('[loadNotes]', err, err.data);
         state.notes = [];
         renderNotes();
+
+        if (err.status === 401) {
+            showToast('Sesi berakhir. Silakan login ulang.', 'error');
+            handleLogout(true);
+            return;
+        }
         showToast('Gagal memuat catatan: ' + err.message, 'error');
     }
 }
 
-// ==================== RENDER NOTES ====================
+// ==================== RENDER ====================
 function getFilteredNotes() {
     let notes = [...state.notes];
-    
-    // Filter
+
     if (state.filter === 'pinned') {
         notes = notes.filter(n => n.is_pinned && !n.is_archived);
     } else if (state.filter === 'archived') {
@@ -254,8 +348,7 @@ function getFilteredNotes() {
     } else {
         notes = notes.filter(n => !n.is_archived);
     }
-    
-    // Search
+
     if (state.search) {
         const q = state.search.toLowerCase();
         notes = notes.filter(n =>
@@ -263,13 +356,12 @@ function getFilteredNotes() {
             (n.content || '').toLowerCase().includes(q)
         );
     }
-    
-    // Sort: pinned first, then updated_at
+
     notes.sort((a, b) => {
-        if (a.is_pinned !== b.is_pinned) return b.is_pinned - a.is_pinned;
-        return new Date(b.updated_at) - new Date(a.updated_at);
+        if (!!a.is_pinned !== !!b.is_pinned) return a.is_pinned ? -1 : 1;
+        return new Date(b.updated_at || 0) - new Date(a.updated_at || 0);
     });
-    
+
     return notes;
 }
 
@@ -277,74 +369,68 @@ function renderNotes() {
     const notes = getFilteredNotes();
     const container = dom.notesContainer;
     container.className = `notes-container ${state.view}`;
-    
-    // Update counts
+
     const all = state.notes.filter(n => !n.is_archived);
     const pinned = state.notes.filter(n => n.is_pinned && !n.is_archived);
     const archived = state.notes.filter(n => n.is_archived);
+
     dom.countAll.textContent = all.length;
     dom.countPinned.textContent = pinned.length;
     dom.countArchived.textContent = archived.length;
-    
-    // Update title
+
     const titles = { all: 'Semua Catatan', pinned: 'Disematkan', archived: 'Arsip' };
-    dom.viewTitle.textContent = titles[state.filter];
+    dom.viewTitle.textContent = titles[state.filter] || 'Catatan';
     dom.noteCountLabel.textContent = `${notes.length} catatan`;
-    
-    // Empty state
+
     if (notes.length === 0) {
         container.innerHTML = '';
         dom.emptyState.classList.remove('hidden');
         return;
     }
     dom.emptyState.classList.add('hidden');
-    
-    // Render cards
+
     container.innerHTML = notes.map(note => `
-        <div class="note-card" style="background:${note.color || '#FFE066'}" data-id="${note.id}">
+        <div class="note-card" style="background:${sanitizeColor(note.color)}" data-id="${escapeAttr(note.id)}">
             <div class="note-card-header">
                 <div class="note-card-title">${escapeHtml(note.title || 'Untitled')}</div>
                 ${note.is_pinned ? '<span class="note-pin-badge">📌</span>' : ''}
             </div>
-            <div class="note-card-content">${escapeHtml(note.content || 'Tidak ada konten...')}</div>
+            <div class="note-card-content">${escapeHtml(note.content || 'Tidak ada konten…')}</div>
             <div class="note-card-footer">
-                <span>${formatDate(note.updated_at)}</span>
+                <span>${formatDate(note.updated_at || note.created_at)}</span>
                 <div class="note-card-actions">
-                    <button class="note-card-action" data-action="pin" data-id="${note.id}" title="${note.is_pinned ? 'Lepas sematan' : 'Sematkan'}">
+                    <button class="note-card-action" data-action="pin" data-id="${escapeAttr(note.id)}" title="${note.is_pinned ? 'Lepas sematan' : 'Sematkan'}">
                         ${note.is_pinned ? '📌' : '📍'}
                     </button>
-                    <button class="note-card-action" data-action="archive" data-id="${note.id}" title="${note.is_archived ? 'Keluarkan dari arsip' : 'Arsipkan'}">
+                    <button class="note-card-action" data-action="archive" data-id="${escapeAttr(note.id)}" title="${note.is_archived ? 'Keluarkan dari arsip' : 'Arsipkan'}">
                         ${note.is_archived ? '📤' : '🗄️'}
                     </button>
-                    <button class="note-card-action" data-action="delete" data-id="${note.id}" title="Hapus">🗑️</button>
+                    <button class="note-card-action" data-action="delete" data-id="${escapeAttr(note.id)}" title="Hapus">🗑️</button>
                 </div>
             </div>
         </div>
     `).join('');
-    
-    // Bind events
+
     container.querySelectorAll('.note-card').forEach(card => {
         card.addEventListener('click', (e) => {
             if (e.target.closest('.note-card-action')) return;
             openEditor(card.dataset.id);
         });
     });
-    
+
     container.querySelectorAll('.note-card-action').forEach(btn => {
         btn.addEventListener('click', async (e) => {
             e.stopPropagation();
             const { action, id } = btn.dataset;
-            const note = state.notes.find(n => n.id === id);
+            const note = state.notes.find(n => String(n.id) === String(id));
             if (!note) return;
-            
+
             if (action === 'pin') {
                 await quickUpdate(id, { is_pinned: !note.is_pinned });
             } else if (action === 'archive') {
                 await quickUpdate(id, { is_archived: !note.is_archived });
             } else if (action === 'delete') {
-                if (confirm('Hapus catatan ini?')) {
-                    await deleteNoteById(id);
-                }
+                if (confirm('Hapus catatan ini?')) await deleteNoteById(id);
             }
         });
     });
@@ -352,12 +438,14 @@ function renderNotes() {
 
 async function quickUpdate(id, updates) {
     try {
-        const updated = await api.updateNote(id, updates);
-        const idx = state.notes.findIndex(n => n.id === id);
-        if (idx >= 0) state.notes[idx] = { ...state.notes[idx], ...updates };
+        await api.updateNote(id, updates);
+        const idx = state.notes.findIndex(n => String(n.id) === String(id));
+        if (idx >= 0) {
+            state.notes[idx] = { ...state.notes[idx], ...updates, updated_at: new Date().toISOString() };
+        }
         renderNotes();
-        showToast('Catatan diperbarui', 'success');
     } catch (err) {
+        console.error('[quickUpdate]', err);
         showToast('Gagal memperbarui: ' + err.message, 'error');
     }
 }
@@ -365,29 +453,30 @@ async function quickUpdate(id, updates) {
 async function deleteNoteById(id) {
     try {
         await api.deleteNote(id);
-        state.notes = state.notes.filter(n => n.id !== id);
+        state.notes = state.notes.filter(n => String(n.id) !== String(id));
         renderNotes();
         showToast('Catatan dihapus', 'success');
     } catch (err) {
+        console.error('[delete]', err);
         showToast('Gagal menghapus: ' + err.message, 'error');
     }
 }
 
 // ==================== EDITOR ====================
 function openEditor(id) {
-    const note = state.notes.find(n => n.id === id);
+    const note = state.notes.find(n => String(n.id) === String(id));
     if (!note) return;
-    
+
     state.editingNote = note;
-    state.selectedColor = note.color || '#FFE066';
-    
+    state.selectedColor = sanitizeColor(note.color);
+
     dom.noteTitle.value = note.title || '';
     dom.noteContent.value = note.content || '';
     dom.noteUpdatedAt.textContent = `Diperbarui ${formatDate(note.updated_at)}`;
-    
+
     dom.pinNoteBtn.textContent = note.is_pinned ? '📌' : '📍';
     dom.archiveNoteBtn.textContent = note.is_archived ? '📤' : '🗄️';
-    
+
     updateColorSwatches();
     dom.editorModal.classList.remove('hidden');
     setTimeout(() => dom.noteTitle.focus(), 100);
@@ -425,21 +514,23 @@ dom.colorSwatches.forEach(sw => {
 });
 
 dom.closeEditorBtn.addEventListener('click', closeEditor);
-dom.editorModal.querySelector('.modal-backdrop').addEventListener('click', closeEditor);
+dom.editorBackdrop.addEventListener('click', closeEditor);
 
 dom.saveNoteBtn.addEventListener('click', async () => {
-    const title = dom.noteTitle.value.trim() || 'Untitled';
+    const title = (dom.noteTitle.value.trim() || 'Untitled').slice(0, 255);
     const content = dom.noteContent.value;
-    
+
     dom.saveNoteBtn.disabled = true;
-    dom.saveNoteBtn.textContent = 'Menyimpan...';
-    
+    dom.saveNoteBtn.textContent = 'Menyimpan…';
+
     try {
         if (state.editingNote) {
             const updates = { title, content, color: state.selectedColor };
-            const updated = await api.updateNote(state.editingNote.id, updates);
-            const idx = state.notes.findIndex(n => n.id === state.editingNote.id);
-            if (idx >= 0) state.notes[idx] = { ...state.notes[idx], ...updates, updated_at: new Date().toISOString() };
+            await api.updateNote(state.editingNote.id, updates);
+            const idx = state.notes.findIndex(n => String(n.id) === String(state.editingNote.id));
+            if (idx >= 0) {
+                state.notes[idx] = { ...state.notes[idx], ...updates, updated_at: new Date().toISOString() };
+            }
             showToast('Catatan disimpan', 'success');
         } else {
             const newNote = {
@@ -450,12 +541,18 @@ dom.saveNoteBtn.addEventListener('click', async () => {
                 is_archived: false,
             };
             const created = await api.createNote(newNote);
-            state.notes.unshift(created);
+            if (created && created.id) {
+                state.notes.unshift(created);
+            } else {
+                // Fallback: reload
+                state.notes = await api.getNotes();
+            }
             showToast('Catatan dibuat', 'success');
         }
         renderNotes();
         closeEditor();
     } catch (err) {
+        console.error('[save]', err, err.data);
         showToast('Gagal menyimpan: ' + err.message, 'error');
     } finally {
         dom.saveNoteBtn.disabled = false;
@@ -464,45 +561,37 @@ dom.saveNoteBtn.addEventListener('click', async () => {
 });
 
 dom.pinNoteBtn.addEventListener('click', async () => {
-    if (!state.editingNote) {
-        showToast('Simpan catatan dulu', 'error');
-        return;
-    }
+    if (!state.editingNote) { showToast('Simpan catatan dulu', 'error'); return; }
     const newVal = !state.editingNote.is_pinned;
-    await quickUpdate(state.editingNote.id, { is_pinned: newVal });
     state.editingNote.is_pinned = newVal;
     dom.pinNoteBtn.textContent = newVal ? '📌' : '📍';
+    await quickUpdate(state.editingNote.id, { is_pinned: newVal });
 });
 
 dom.archiveNoteBtn.addEventListener('click', async () => {
-    if (!state.editingNote) {
-        showToast('Simpan catatan dulu', 'error');
-        return;
-    }
+    if (!state.editingNote) { showToast('Simpan catatan dulu', 'error'); return; }
     const newVal = !state.editingNote.is_archived;
-    await quickUpdate(state.editingNote.id, { is_archived: newVal });
     state.editingNote.is_archived = newVal;
     dom.archiveNoteBtn.textContent = newVal ? '📤' : '🗄️';
+    await quickUpdate(state.editingNote.id, { is_archived: newVal });
 });
 
 dom.deleteNoteBtn.addEventListener('click', async () => {
-    if (!state.editingNote) {
-        closeEditor();
-        return;
-    }
+    if (!state.editingNote) { closeEditor(); return; }
     if (confirm('Hapus catatan ini?')) {
         await deleteNoteById(state.editingNote.id);
         closeEditor();
     }
 });
 
-// ==================== NAV & FILTERS ====================
+// ==================== FILTER & VIEW ====================
 dom.navItems.forEach(item => {
     item.addEventListener('click', () => {
         dom.navItems.forEach(i => i.classList.remove('active'));
         item.classList.add('active');
         state.filter = item.dataset.filter;
         renderNotes();
+        dom.sidebar.classList.remove('open');
     });
 });
 
@@ -520,14 +609,13 @@ dom.viewBtns.forEach(btn => {
     });
 });
 
-// ==================== NEW NOTE BUTTONS ====================
+// ==================== NEW NOTE ====================
 dom.newNoteBtn.addEventListener('click', openNewNote);
 dom.emptyNewNoteBtn.addEventListener('click', openNewNote);
 
 // ==================== LOGOUT ====================
-dom.logoutBtn.addEventListener('click', async () => {
-    if (!confirm('Keluar dari MyNotes?')) return;
-    await api.signOut();
+function handleLogout(skipConfirm = false) {
+    if (!skipConfirm && !confirm('Keluar dari MyNotes?')) return;
     state.token = null;
     state.user = null;
     state.notes = [];
@@ -536,31 +624,59 @@ dom.logoutBtn.addEventListener('click', async () => {
     dom.app.classList.add('hidden');
     dom.authScreen.classList.remove('hidden');
     dom.authForm.reset();
-});
+    setAuthMode('login');
+}
+
+dom.logoutBtn.addEventListener('click', () => handleLogout(false));
 
 // ==================== MOBILE MENU ====================
 dom.mobileMenu.addEventListener('click', () => {
     dom.sidebar.classList.toggle('open');
 });
 
+// Close sidebar on outside click (mobile)
+document.addEventListener('click', (e) => {
+    if (window.innerWidth > 768) return;
+    if (!dom.sidebar.classList.contains('open')) return;
+    if (dom.sidebar.contains(e.target) || dom.mobileMenu.contains(e.target)) return;
+    dom.sidebar.classList.remove('open');
+});
+
 // ==================== UTILS ====================
 function escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
+    if (str == null) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+function escapeAttr(str) {
+    return escapeHtml(str);
+}
+
+function sanitizeColor(color) {
+    const fallback = '#FFE066';
+    if (!color || typeof color !== 'string') return fallback;
+    return /^#[0-9A-Fa-f]{6}$/.test(color) ? color : fallback;
 }
 
 function formatDate(dateStr) {
     if (!dateStr) return '-';
     const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return '-';
+
     const now = new Date();
     const diff = (now - d) / 1000;
-    
+
+    if (diff < 0) return 'Baru saja';
     if (diff < 60) return 'Baru saja';
     if (diff < 3600) return `${Math.floor(diff / 60)}m lalu`;
     if (diff < 86400) return `${Math.floor(diff / 3600)}j lalu`;
     if (diff < 604800) return `${Math.floor(diff / 86400)}h lalu`;
-    
+
     return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
@@ -571,43 +687,61 @@ function showToast(message, type = '') {
     clearTimeout(toastTimeout);
     toastTimeout = setTimeout(() => {
         dom.toast.classList.add('hidden');
-    }, 3000);
+    }, 3200);
 }
 
 // ==================== KEYBOARD SHORTCUTS ====================
 document.addEventListener('keydown', (e) => {
-    // Ctrl/Cmd + S = Save
-    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+    // Ctrl/Cmd + S → Save
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         if (!dom.editorModal.classList.contains('hidden')) {
             e.preventDefault();
             dom.saveNoteBtn.click();
         }
     }
-    // Escape = Close editor
+    // Escape → Close editor
     if (e.key === 'Escape' && !dom.editorModal.classList.contains('hidden')) {
         closeEditor();
     }
-    // Ctrl/Cmd + K = Focus search
-    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+    // Ctrl/Cmd + K → Focus search
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
-        dom.searchInput.focus();
+        if (!dom.app.classList.contains('hidden')) dom.searchInput.focus();
     }
 });
 
 // ==================== AUTO LOGIN ====================
 (async function init() {
-    if (state.token) {
-        try {
-            // Verify token masih valid
-            const user = await api.getUser();
-            state.user = user.user || user;
+    // Restore user info
+    try {
+        const cachedUser = localStorage.getItem('mynotes_user');
+        if (cachedUser) state.user = JSON.parse(cachedUser);
+    } catch {}
+
+    if (!state.token) return;
+
+    // Coba verifikasi token (best-effort, kalau endpoint tidak ada, lanjut saja)
+    try {
+        const me = await api.me();
+        if (me) {
+            state.user = me.user || me.data?.user || me;
             localStorage.setItem('mynotes_user', JSON.stringify(state.user));
-            await enterApp();
-        } catch (err) {
-            console.warn('Auto-login gagal:', err.message);
+        }
+    } catch (err) {
+        if (err.status === 401) {
+            // Token invalid → paksa login
             localStorage.removeItem('mynotes_token');
             localStorage.removeItem('mynotes_user');
             state.token = null;
+            state.user = null;
+            return;
         }
+        // 404/endpoint tidak ada → lanjut pakai token
+    }
+
+    try {
+        await enterApp();
+    } catch (err) {
+        console.error('[auto-login]', err);
     }
 })();
