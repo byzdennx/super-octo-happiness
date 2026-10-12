@@ -1,161 +1,162 @@
 <!DOCTYPE html>
 <html lang="id">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MyNotes — Catatan Pintar</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MyNotes — Catatan Pintar</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- Auth Screen -->
-    <div id="authScreen" class="auth-screen">
-        <div class="auth-card">
-            <div class="auth-header">
-                <div class="logo-badge">📝</div>
-                <h1>MyNotes</h1>
-                <p class="tagline">Catatan pintar dengan gaya.</p>
-            </div>
-            <div class="auth-tabs">
-                <button class="auth-tab active" data-tab="login">Masuk</button>
-                <button class="auth-tab" data-tab="register">Daftar</button>
-            </div>
-            <form id="authForm" class="auth-form">
-                <div class="input-group">
-                    <label>Email</label>
-                    <input type="email" id="email" placeholder="kamu@email.com" required>
-                </div>
-                <div class="input-group">
-                    <label>Password</label>
-                    <input type="password" id="password" placeholder="••••••••" required minlength="6">
-                </div>
-                <button type="submit" class="btn btn-primary btn-block" id="authSubmit">
-                    Masuk
-                </button>
-            </form>
-            <p class="auth-footer" id="authFooter">
-                Belum punya akun? <a href="#" id="switchAuth">Daftar sekarang</a>
-            </p>
+
+<!-- ============ AUTH SCREEN ============ -->
+<div id="authScreen" class="auth-screen">
+  <div class="auth-card">
+    <div class="auth-header">
+      <div class="logo-badge">📝</div>
+      <h1>MyNotes</h1>
+      <p class="tagline">Catatan pintar dengan gaya.</p>
+    </div>
+
+    <div class="auth-tabs">
+      <button class="auth-tab active" data-tab="login">Masuk</button>
+      <button class="auth-tab" data-tab="register">Daftar</button>
+    </div>
+
+    <form id="authForm" class="auth-form" autocomplete="on">
+      <div class="input-group">
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" placeholder="kamu@email.com" required autocomplete="email">
+      </div>
+      <div class="input-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" placeholder="••••••••" required minlength="6" autocomplete="current-password">
+      </div>
+      <button type="submit" class="btn btn-primary btn-block" id="authSubmit">Masuk</button>
+    </form>
+
+    <p class="auth-footer" id="authFooter">
+      Belum punya akun? <a href="#" id="switchAuth">Daftar sekarang</a>
+    </p>
+  </div>
+</div>
+
+<!-- ============ MAIN APP ============ -->
+<div id="app" class="app hidden">
+
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">
+        <span class="logo-icon">📝</span>
+        <span class="logo-text">MyNotes</span>
+      </div>
+      <button class="btn-icon" id="logoutBtn" title="Keluar">⏻</button>
+    </div>
+
+    <button class="btn btn-primary btn-block new-note-btn" id="newNoteBtn">
+      <span>＋</span> Catatan Baru
+    </button>
+
+    <nav class="sidebar-nav">
+      <button class="nav-item active" data-filter="all">
+        <span class="nav-icon">📋</span>
+        <span>Semua Catatan</span>
+        <span class="nav-count" id="countAll">0</span>
+      </button>
+      <button class="nav-item" data-filter="pinned">
+        <span class="nav-icon">📌</span>
+        <span>Disematkan</span>
+        <span class="nav-count" id="countPinned">0</span>
+      </button>
+      <button class="nav-item" data-filter="archived">
+        <span class="nav-icon">🗄️</span>
+        <span>Arsip</span>
+        <span class="nav-count" id="countArchived">0</span>
+      </button>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="user-info">
+        <div class="user-avatar" id="userAvatar">U</div>
+        <div class="user-details">
+          <div class="user-email" id="userEmail">user@email.com</div>
+          <div class="user-status">● Online</div>
         </div>
+      </div>
     </div>
+  </aside>
 
-    <!-- Main App -->
-    <div id="app" class="app hidden">
-        <!-- Sidebar -->
-        <aside class="sidebar">
-            <div class="sidebar-header">
-                <div class="logo">
-                    <span class="logo-icon">📝</span>
-                    <span class="logo-text">MyNotes</span>
-                </div>
-                <button class="btn-icon" id="logoutBtn" title="Keluar">⏻</button>
-            </div>
+  <!-- Main -->
+  <main class="main">
+    <header class="topbar">
+      <button class="btn-icon mobile-menu" id="mobileMenu">☰</button>
+      <div class="search-box">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="searchInput" placeholder="Cari catatan... (Ctrl+K)">
+      </div>
+      <div class="view-toggle">
+        <button class="view-btn active" data-view="grid" title="Grid">▦</button>
+        <button class="view-btn" data-view="list" title="List">☰</button>
+      </div>
+    </header>
 
-            <button class="btn btn-primary btn-block new-note-btn" id="newNoteBtn">
-                <span>＋</span> Catatan Baru
-            </button>
+    <div class="content-area">
+      <div class="content-header">
+        <h2 id="viewTitle">Semua Catatan</h2>
+        <span class="note-count-label" id="noteCountLabel">0 catatan</span>
+      </div>
 
-            <nav class="sidebar-nav">
-                <button class="nav-item active" data-filter="all">
-                    <span class="nav-icon">📋</span>
-                    <span>Semua Catatan</span>
-                    <span class="nav-count" id="countAll">0</span>
-                </button>
-                <button class="nav-item" data-filter="pinned">
-                    <span class="nav-icon">📌</span>
-                    <span>Disematkan</span>
-                    <span class="nav-count" id="countPinned">0</span>
-                </button>
-                <button class="nav-item" data-filter="archived">
-                    <span class="nav-icon">🗄️</span>
-                    <span>Arsip</span>
-                    <span class="nav-count" id="countArchived">0</span>
-                </button>
-            </nav>
+      <div class="notes-container grid" id="notesContainer"></div>
 
-            <div class="sidebar-footer">
-                <div class="user-info">
-                    <div class="user-avatar" id="userAvatar">U</div>
-                    <div class="user-details">
-                        <div class="user-email" id="userEmail">user@email.com</div>
-                        <div class="user-status">● Online</div>
-                    </div>
-                </div>
-            </div>
-        </aside>
-
-        <!-- Main Content -->
-        <main class="main">
-            <header class="topbar">
-                <button class="btn-icon mobile-menu" id="mobileMenu">☰</button>
-                <div class="search-box">
-                    <span class="search-icon">🔍</span>
-                    <input type="text" id="searchInput" placeholder="Cari catatan...">
-                </div>
-                <div class="view-toggle">
-                    <button class="view-btn active" data-view="grid" title="Grid">▦</button>
-                    <button class="view-btn" data-view="list" title="List">☰</button>
-                </div>
-            </header>
-
-            <div class="content-area">
-                <div class="content-header">
-                    <h2 id="viewTitle">Semua Catatan</h2>
-                    <span class="note-count-label" id="noteCountLabel">0 catatan</span>
-                </div>
-
-                <div class="notes-container grid" id="notesContainer">
-                    <!-- Notes akan di-render di sini -->
-                </div>
-
-                <div class="empty-state hidden" id="emptyState">
-                    <div class="empty-illustration">📭</div>
-                    <h3>Belum ada catatan</h3>
-                    <p>Mulai dengan membuat catatan pertamamu!</p>
-                    <button class="btn btn-primary" id="emptyNewNoteBtn">＋ Buat Catatan</button>
-                </div>
-            </div>
-        </main>
+      <div class="empty-state hidden" id="emptyState">
+        <div class="empty-illustration">📭</div>
+        <h3>Belum ada catatan</h3>
+        <p>Mulai dengan membuat catatan pertamamu!</p>
+        <button class="btn btn-primary" id="emptyNewNoteBtn">＋ Buat Catatan</button>
+      </div>
     </div>
+  </main>
+</div>
 
-    <!-- Editor Modal -->
-    <div id="editorModal" class="modal hidden">
-        <div class="modal-backdrop"></div>
-        <div class="modal-content editor-modal">
-            <div class="editor-header">
-                <input type="text" id="noteTitle" class="editor-title" placeholder="Judul catatan..." maxlength="255">
-                <div class="editor-actions">
-                    <button class="btn-icon" id="pinNoteBtn" title="Sematkan">📌</button>
-                    <button class="btn-icon" id="archiveNoteBtn" title="Arsipkan">🗄️</button>
-                    <button class="btn-icon danger" id="deleteNoteBtn" title="Hapus">🗑️</button>
-                    <button class="btn btn-primary" id="saveNoteBtn">Simpan</button>
-                    <button class="btn-icon" id="closeEditorBtn" title="Tutup">✕</button>
-                </div>
-            </div>
-            <textarea id="noteContent" class="editor-content" placeholder="Tulis catatanmu di sini..."></textarea>
-            <div class="editor-footer">
-                <div class="color-picker">
-                    <span class="color-label">Warna:</span>
-                    <button class="color-swatch active" data-color="#FFE066" style="background:#FFE066"></button>
-                    <button class="color-swatch" data-color="#B8E0FF" style="background:#B8E0FF"></button>
-                    <button class="color-swatch" data-color="#FFB8D9" style="background:#FFB8D9"></button>
-                    <button class="color-swatch" data-color="#C7F0BD" style="background:#C7F0BD"></button>
-                    <button class="color-swatch" data-color="#E0C7FF" style="background:#E0C7FF"></button>
-                    <button class="color-swatch" data-color="#FFD4A8" style="background:#FFD4A8"></button>
-                    <button class="color-swatch" data-color="#FFFFFF" style="background:#FFFFFF"></button>
-                </div>
-                <div class="editor-meta">
-                    <span id="noteUpdatedAt">Baru saja</span>
-                </div>
-            </div>
-        </div>
+<!-- ============ EDITOR MODAL ============ -->
+<div id="editorModal" class="modal hidden">
+  <div class="modal-backdrop" id="editorBackdrop"></div>
+  <div class="modal-content editor-modal">
+    <div class="editor-header">
+      <input type="text" id="noteTitle" class="editor-title" placeholder="Judul catatan..." maxlength="255">
+      <div class="editor-actions">
+        <button class="btn-icon" id="pinNoteBtn" title="Sematkan">📍</button>
+        <button class="btn-icon" id="archiveNoteBtn" title="Arsipkan">🗄️</button>
+        <button class="btn-icon danger" id="deleteNoteBtn" title="Hapus">🗑️</button>
+        <button class="btn btn-primary" id="saveNoteBtn">Simpan</button>
+        <button class="btn-icon" id="closeEditorBtn" title="Tutup">✕</button>
+      </div>
     </div>
+    <textarea id="noteContent" class="editor-content" placeholder="Tulis catatanmu di sini..."></textarea>
+    <div class="editor-footer">
+      <div class="color-picker">
+        <span class="color-label">Warna:</span>
+        <button class="color-swatch active" data-color="#FFE066" style="background:#FFE066"></button>
+        <button class="color-swatch" data-color="#B8E0FF" style="background:#B8E0FF"></button>
+        <button class="color-swatch" data-color="#FFB8D9" style="background:#FFB8D9"></button>
+        <button class="color-swatch" data-color="#C7F0BD" style="background:#C7F0BD"></button>
+        <button class="color-swatch" data-color="#E0C7FF" style="background:#E0C7FF"></button>
+        <button class="color-swatch" data-color="#FFD4A8" style="background:#FFD4A8"></button>
+        <button class="color-swatch" data-color="#FFFFFF" style="background:#FFFFFF"></button>
+      </div>
+      <div class="editor-meta">
+        <span id="noteUpdatedAt">Baru saja</span>
+      </div>
+    </div>
+  </div>
+</div>
 
-    <!-- Toast -->
-    <div id="toast" class="toast hidden"></div>
+<!-- Toast -->
+<div id="toast" class="toast hidden"></div>
 
-    <script src="app.js"></script>
+<script src="app.js"></script>
 </body>
 </html>
