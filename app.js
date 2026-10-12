@@ -9,7 +9,7 @@
 
 // ==================== CONFIG ====================
 const EPANBASE_URL = 'https://gentle-sea-6f11.siburianepan1.workers.dev';
-const EPANBASE_KEY = 'epb_fe5afa0eea5205945093479b7110c9277f025a64e061e8df';
+const EPANBASE_KEY = 'epb_11bb9fc787df450c120d5aca67a759de07575e991f4afd07';
 
 // ==================== STATE ====================
 const state = {
